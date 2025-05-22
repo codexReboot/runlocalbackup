@@ -123,7 +123,7 @@ sudo apt install rsync zenity libnotify-bin
 
 ### ✍️ Author
 
-**Schalk Neethling**  
+**Schalk van Dyk t/a codexReboot**  
 - 🌐 [Website](https://schalkvandyk.com)  
 - 💼 [GitHub](https://github.com/codexReboot)  
 - 👔 [LinkedIn](https://www.linkedin.com/in/codexreboot/) 
