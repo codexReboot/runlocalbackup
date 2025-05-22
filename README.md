@@ -1,6 +1,14 @@
 # 🛡️ Local Backup Script for Linux
 
-This is a robust and user-friendly Bash script for performing automated, versioned backups of your home directory (`/home/<user>`) to a local folder. Designed for developers and professionals, the script includes progress indicators, notifications, backup rotation, and logging.
+This is a robust and user-friendly Bash script developed specifically for Linux systems such as Ubuntu. It automates versioned backups of your home directory (`/home/<user>`) into a local Backups/ folder.
+
+Designed for developers and professionals, the script features:
+
+- ✅ Progress indicators with a graphical interface (zenity)
+- ✅ Desktop notifications (notify-send)
+- ✅ Intelligent backup rotation (keeps the last N versions)
+- ✅ Comprehensive logging and backup summaries
+- ✅ Human-readable reporting of size, file count, and duration
 
 ---
 
