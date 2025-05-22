@@ -1,0 +1,37 @@
+{
+  "name": "laptop-backup-script",
+  "version": "1.0.0",
+  "description": "Automated Bash script for backing up a Linux home directory with logging, progress tracking, and cleanup.",
+  "author": "Schalk",
+  "license": "MIT",
+  "scripts": {
+    "start": "bash ~/bin/local_backup.sh"
+  },
+  "keywords": [
+    "bash",
+    "backup",
+    "rsync",
+    "linux",
+    "automation",
+    "zenity",
+    "notify-send"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codexReboot/runlocalbackup"
+  },
+  "project": {
+    "id": "PRJ-20250521-007",
+    "client": "Schalk",
+    "start_date": "2025-05-21",
+    "end_date": "2025-05-22",
+    "status": "Completed"
+  },
+  "systemDependencies": {
+    "bash": ">=4.0",
+    "rsync": ">=3.1",
+    "zenity": "*",
+    "notify-send": "*",
+    "coreutils": ">=8.0"
+  }
+}
