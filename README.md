@@ -1,4 +1,4 @@
-# 🛡️ Local Backup Script for Linux
+# 🛡️ Run Local Backup Script for Linux
 
 This is a robust and user-friendly Bash script developed specifically for Linux systems such as Ubuntu. It automates versioned backups of your home directory (`/home/<user>`) into a local Backups/ folder.
 
@@ -67,7 +67,7 @@ The script excludes the following to speed up the backup and avoid redundant fil
 Now you can run your backup from anywhere using:
 
 ```bash
-runbackupschalk
+runlocalbackup
 ```
 
 ---
