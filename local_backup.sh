@@ -1,141 +1,97 @@
 #!/bin/bash
-# -----------------------------------
-# CONFIGURATION
-# -----------------------------------
+
 USER="schalk"
 SRC="/home/$USER"
 BACKUP_BASE="/home/$USER/Backups"
-COUNTER_FILE="$BACKUP_BASE/backup_counter.txt"
-SUMMARY_FILE="$BACKUP_BASE/backup_summary.csv"
+LOG_DIR="$BACKUP_BASE/logs"
+CSV_LOG="$BACKUP_BASE/backup_history.csv"
+BACKUP_NUM_FILE="$BACKUP_BASE/backup_number.txt"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M")
-
-# -----------------------------------
-# INITIALIZE BACKUP NUMBER
-# -----------------------------------
-mkdir -p "$BACKUP_BASE"
-if [ ! -f "$COUNTER_FILE" ]; then
-    echo "1" > "$COUNTER_FILE"
-fi
-
-BACKUP_NUMBER=$(cat "$COUNTER_FILE")
-NEXT_BACKUP_NUMBER=$((BACKUP_NUMBER + 1))
-echo "$NEXT_BACKUP_NUMBER" > "$COUNTER_FILE"
-
-BACKUP_DIR="$BACKUP_BASE/backup-$TIMESTAMP"
-LOG_FILE="$BACKUP_BASE/backup-$TIMESTAMP.log"
-NUM_BACKUPS_TO_KEEP=4
-
-# -----------------------------------
-# INITIATE LOGGING
-# -----------------------------------
-exec > >(tee -a "$LOG_FILE") 2>&1
-echo "=== Backup started at $(date) ==="
-echo "📦 This is backup number: $BACKUP_NUMBER"
-
-# -----------------------------------
-# SHOW START NOTIFICATION
-# -----------------------------------
-if command -v notify-send >/dev/null 2>&1; then
-  notify-send "💾 Backup #$BACKUP_NUMBER Started" "Started at $TIMESTAMP"
-fi
-
-# -----------------------------------
-# START TIMER (outside subshell!)
-# -----------------------------------
+BACKUP_DATE=$(date +"%Y-%m-%d")
 START_TIME=$(date +%s)
+BACKUP_DIR="$BACKUP_BASE/backup-$TIMESTAMP"
 
-# -----------------------------------
-# ZENITY PROGRESS INTERFACE
-# -----------------------------------
-(
-  echo "10"; echo "# Step 1 of 5: Preparing..." ; sleep 1
+mkdir -p "$BACKUP_DIR" "$LOG_DIR"
 
-  if [ ! -d "$SRC" ]; then
-      echo "# ERROR: Source directory missing."; sleep 1; echo "100"
-      exit 1
-  fi
+# Ask for confirmation
+zenity --question --title="Local Backup" --text="A new backup will start now. Proceed?" 2>/dev/null || exit 1
 
-  echo "30"; echo "# Step 2 of 5: Creating backup folder..." ; sleep 1
-  mkdir -p "$BACKUP_DIR" || { echo "# ERROR: Can't create backup directory."; echo "100"; exit 1; }
+# Determine backup number
+if [[ -f "$BACKUP_NUM_FILE" ]]; then
+    BACKUP_NUM=$(<"$BACKUP_NUM_FILE")
+    BACKUP_NUM=$((BACKUP_NUM + 1))
+else
+    BACKUP_NUM=1
+fi
+echo "$BACKUP_NUM" > "$BACKUP_NUM_FILE"
 
-  echo "50"; echo "# Step 3 of 5: Backing up files..." ; sleep 1
+RSYNC_LOG=$(mktemp)
 
-  rsync -a --info=progress2 --ignore-errors \
-    --exclude=".cache/" \
-    --exclude="Downloads/" \
-    --exclude=".local/share/Trash/" \
-    --exclude="**/node_modules/" \
-    --exclude="Backups/" \
-    "$SRC/" "$BACKUP_DIR/"
-  RSYNC_STATUS=$?
+# Run rsync silently and capture output
+rsync -a --stats --ignore-errors \
+  --exclude=".cache/" \
+  --exclude="Downloads/" \
+  --exclude=".local/share/Trash/" \
+  --exclude="**/node_modules/" \
+  --exclude="Backups/" \
+  "$SRC/" "$BACKUP_DIR/" > "$RSYNC_LOG" 2>&1
 
-  if [ $RSYNC_STATUS -ne 0 ]; then
-    echo "# ERROR: rsync failed."
-    echo "100"
-    exit 1
-  fi
+# Parse rsync stats
+RAW_TRANSFERRED=$(grep "Number of regular files transferred:" "$RSYNC_LOG" | awk -F: '{print $2}' | tr -d ' ')
+RAW_SCANNED=$(grep "Number of files:" "$RSYNC_LOG" | sed -E 's/Number of files:[[:space:]]*([0-9,]+).*/\1/' | tr -d ' ')
 
-  echo "80"; echo "# Step 4 of 5: Cleaning up old backups..." ; sleep 1
+FILES_TRANSFERRED=$(echo "$RAW_TRANSFERRED" | tr -d ',' | tr -d '\r')
+FILES_SCANNED=$(echo "$RAW_SCANNED" | tr -d ',' | tr -d '\r')
+FILES_TRANSFERRED=${FILES_TRANSFERRED:-0}
+FILES_SCANNED=${FILES_SCANNED:-0}
 
-  cd "$BACKUP_BASE" || exit 1
-  OLD_BACKUPS=$(ls -dt backup-* | tail -n +$((NUM_BACKUPS_TO_KEEP + 1)))
-  [ -n "$OLD_BACKUPS" ] && echo "$OLD_BACKUPS" | xargs -d '\n' rm -rf --
+FILES_TRANSFERRED_HR=$(printf "%'d" "$FILES_TRANSFERRED")
+FILES_SCANNED_HR=$(printf "%'d" "$FILES_SCANNED")
 
-  echo "100"; echo "# Step 5 of 5: Done!"
-  sleep 1
+# Get backup size
+SIZE_HUMAN=$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1)
 
-) | zenity --progress --title="Backup in Progress" \
-  --percentage=0 --width=450 --height=100 \
-  --auto-close --auto-kill
+# Time elapsed
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+ELAPSED_HR=$(printf '%02d:%02d:%02d' $((ELAPSED/3600)) $((ELAPSED%3600/60)) $((ELAPSED%60)))
 
-# -----------------------------------
-# IF USER CANCELED
-# -----------------------------------
-if [ $? -ne 0 ]; then
-  echo "⚠️ Backup was canceled by user."
-  rm -rf "$BACKUP_DIR"
-  echo "Deleted incomplete backup folder: $BACKUP_DIR"
-
-  [ ! -f "$SUMMARY_FILE" ] && echo "Backup #,Date/Time,Duration (H:M:S),Files,Size,Status" > "$SUMMARY_FILE"
-  echo "$BACKUP_NUMBER,$TIMESTAMP,00:00:00,0,0,Canceled" >> "$SUMMARY_FILE"
-
-  notify-send -u critical "⚠️ Backup Canceled" "Backup #$BACKUP_NUMBER was canceled and deleted."
-  echo "=== Backup canceled ==="
-  exit 1
+# Delete oldest if more than 4 backups
+BACKUPS=($(find "$BACKUP_BASE" -maxdepth 1 -type d -name "backup-*" | sort))
+DELETED_BACKUP=""
+if (( ${#BACKUPS[@]} > 4 )); then
+    OLDEST="${BACKUPS[0]}"
+    rm -rf "$OLDEST"
+    OLD_LOG="$LOG_DIR/$(basename "$OLDEST").log"
+    [[ -f "$OLD_LOG" ]] && rm "$OLD_LOG"
+    DELETED_BACKUP="$OLDEST"
 fi
 
-# -----------------------------------
-# FINALIZE & SUMMARIZE
-# -----------------------------------
-END_TIME=$(date +%s)
-DURATION=$((END_TIME - START_TIME))
+# Write log
+SUMMARY_LOG="$LOG_DIR/backup-$TIMESTAMP.log"
+echo "=====  📝 Backup Summary: $BACKUP_DATE  =====" > "$SUMMARY_LOG"
+echo "" >> "$SUMMARY_LOG"
+echo "🔢 Backup number:      $BACKUP_NUM" >> "$SUMMARY_LOG"
+echo "📦 Backup location:    $BACKUP_DIR" >> "$SUMMARY_LOG"
+echo "📁 Files copied:       $FILES_TRANSFERRED_HR" >> "$SUMMARY_LOG"
+echo "📂 Files scanned:      $FILES_SCANNED_HR" >> "$SUMMARY_LOG"
+echo "📀 Backup size:        $SIZE_HUMAN" >> "$SUMMARY_LOG"
+echo "⏱️  Elapsed time:       $ELAPSED_HR" >> "$SUMMARY_LOG"
+[[ -n "$DELETED_BACKUP" ]] && echo "🗑️  Deleted old backup: $DELETED_BACKUP" >> "$SUMMARY_LOG"
+echo "✅ Status:             Completed" >> "$SUMMARY_LOG"
+echo "" >> "$SUMMARY_LOG"
+echo "==========  🎉 Backup Successful  ==========" >> "$SUMMARY_LOG"
+# Append to CSV
+if [ ! -f "$CSV_LOG" ]; then
+    echo "Number,Date,Time,BackupPath,Size,FilesCopied,FilesScanned,Elapsed,DeletedBackup" > "$CSV_LOG"
+fi
+echo "$BACKUP_NUM,$BACKUP_DATE,$TIMESTAMP,$BACKUP_DIR,$SIZE_HUMAN,$FILES_TRANSFERRED,$FILES_SCANNED,$ELAPSED_HR,$DELETED_BACKUP" >> "$CSV_LOG"
 
-# Format duration as HH:MM:SS
-HOURS=$((DURATION / 3600))
-MINUTES=$(((DURATION % 3600) / 60))
-SECONDS=$((DURATION % 60))
-FORMATTED_DURATION=$(printf "%02d:%02d:%02d" $HOURS $MINUTES $SECONDS)
+# Show completion message
+zenity --info --title="Backup Completed" --text="✅ Backup complete! See terminal or $SUMMARY_LOG for summary." 2>/dev/null
 
-# File count with thousands separator
-FILE_COUNT=$(find "$BACKUP_DIR" -type f | wc -l)
-FILE_COUNT_HUMAN=$(printf "%'d" "$FILE_COUNT")
-SIZE_HUMAN=$(du -sh "$BACKUP_DIR" | cut -f1)
+# Print only the summary to terminal
+cat "$SUMMARY_LOG"
 
-# Update CSV summary log
-[ ! -f "$SUMMARY_FILE" ] && echo "Backup #,Date/Time,Duration (H:M:S),Files,Size,Status" > "$SUMMARY_FILE"
-echo "$BACKUP_NUMBER,$TIMESTAMP,$FORMATTED_DURATION,$FILE_COUNT,$SIZE_HUMAN,Completed" >> "$SUMMARY_FILE"
-
-# Print summary to log
-echo ""
-echo "=== Backup Summary ==="
-echo "📦 Backup number:    $BACKUP_NUMBER"
-echo "🕒 Elapsed time:     $FORMATTED_DURATION (hh:mm:ss)"
-echo "📁 Files backed up:  $FILE_COUNT_HUMAN"
-echo "📦 Total size:       $SIZE_HUMAN"
-echo "✅ Status:           Completed"
-
-# Final desktop notification
-notify-send "✅ Backup #$BACKUP_NUMBER Complete" \
-  "Finished in $FORMATTED_DURATION — $FILE_COUNT_HUMAN files, $SIZE_HUMAN"
-
-echo "=== Backup script finished ==="
+# Cleanup
+rm "$RSYNC_LOG"
