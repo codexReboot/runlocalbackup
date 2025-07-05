@@ -1,5 +1,18 @@
 #!/bin/bash
 
+# ========================
+# Detect --cron flag
+# ========================
+IS_CRON=0
+for arg in "$@"; do
+    case $arg in
+        --cron)
+        IS_CRON=1
+        shift
+        ;;
+    esac
+done
+
 USER="schalk"
 SRC="/home/$USER"
 BACKUP_BASE="/home/$USER/Backups"
@@ -13,8 +26,12 @@ BACKUP_DIR="$BACKUP_BASE/backup-$TIMESTAMP"
 
 mkdir -p "$BACKUP_DIR" "$LOG_DIR"
 
-# Ask for confirmation
-zenity --question --title="Local Backup" --text="A new backup will start now. Proceed?" 2>/dev/null || exit 1
+# ========================
+# Prompt user unless --cron
+# ========================
+if [ "$IS_CRON" -eq 0 ]; then
+    zenity --question --title="Local Backup" --text="A new backup will start now. Proceed?" 2>/dev/null || exit 1
+fi
 
 # Determine backup number
 if [[ -f "$BACKUP_NUM_FILE" ]]; then
@@ -69,29 +86,32 @@ fi
 
 # Write log
 SUMMARY_LOG="$LOG_DIR/backup-$TIMESTAMP.log"
-echo "=====  📝 Backup Summary: $BACKUP_DATE  =====" > "$SUMMARY_LOG"
-echo "" >> "$SUMMARY_LOG"
-echo "🔢 Backup number:      $BACKUP_NUM" >> "$SUMMARY_LOG"
-echo "📦 Backup location:    $BACKUP_DIR" >> "$SUMMARY_LOG"
-echo "📁 Files copied:       $FILES_TRANSFERRED_HR" >> "$SUMMARY_LOG"
-echo "📂 Files scanned:      $FILES_SCANNED_HR" >> "$SUMMARY_LOG"
-echo "📀 Backup size:        $SIZE_HUMAN" >> "$SUMMARY_LOG"
-echo "⏱️  Elapsed time:       $ELAPSED_HR" >> "$SUMMARY_LOG"
-[[ -n "$DELETED_BACKUP" ]] && echo "🗑️  Deleted old backup: $DELETED_BACKUP" >> "$SUMMARY_LOG"
-echo "✅ Status:             Completed" >> "$SUMMARY_LOG"
-echo "" >> "$SUMMARY_LOG"
-echo "==========  🎉 Backup Successful  ==========" >> "$SUMMARY_LOG"
+{
+    echo "=====  📝 Backup Summary: $BACKUP_DATE  ====="
+    echo ""
+    echo "🔢 Backup number:      $BACKUP_NUM"
+    echo "📦 Backup location:    $BACKUP_DIR"
+    echo "📁 Files copied:       $FILES_TRANSFERRED_HR"
+    echo "📂 Files scanned:      $FILES_SCANNED_HR"
+    echo "📀 Backup size:        $SIZE_HUMAN"
+    echo "⏱️  Elapsed time:       $ELAPSED_HR"
+    [[ -n "$DELETED_BACKUP" ]] && echo "🗑️  Deleted old backup: $DELETED_BACKUP"
+    echo "✅ Status:             Completed"
+    echo ""
+    echo "==========  🎉 Backup Successful  =========="
+} > "$SUMMARY_LOG"
+
 # Append to CSV
 if [ ! -f "$CSV_LOG" ]; then
     echo "Number,Date,Time,BackupPath,Size,FilesCopied,FilesScanned,Elapsed,DeletedBackup" > "$CSV_LOG"
 fi
 echo "$BACKUP_NUM,$BACKUP_DATE,$TIMESTAMP,$BACKUP_DIR,$SIZE_HUMAN,$FILES_TRANSFERRED,$FILES_SCANNED,$ELAPSED_HR,$DELETED_BACKUP" >> "$CSV_LOG"
 
-# Show completion message
-zenity --info --title="Backup Completed" --text="✅ Backup complete! See terminal or $SUMMARY_LOG for summary." 2>/dev/null
-
-# Print only the summary to terminal
-cat "$SUMMARY_LOG"
+# Completion message (only if not cron)
+if [ "$IS_CRON" -eq 0 ]; then
+    zenity --info --title="Backup Completed" --text="✅ Backup complete! See terminal or $SUMMARY_LOG for summary." 2>/dev/null
+    cat "$SUMMARY_LOG"
+fi
 
 # Cleanup
 rm "$RSYNC_LOG"
